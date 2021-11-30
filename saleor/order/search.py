@@ -1,12 +1,15 @@
 from typing import TYPE_CHECKING
 
 import graphene
-from django.db.models import Q
+from django.db.models import Prefetch, Q, prefetch_related_objects
 
 from ..account.search import (
     generate_address_search_document_value,
     generate_user_fields_search_document_value,
 )
+from ..discount.models import OrderDiscount
+from ..payment.models import Payment
+from .models import OrderLine
 
 if TYPE_CHECKING:
     from .models import Order
@@ -19,6 +22,23 @@ def update_order_search_document(order: "Order"):
 
 def prepare_order_search_document_value(order: "Order"):
     search_document = f"#{str(order.id)}\n"
+
+    payments_prefetch = Prefetch(
+        "payments", queryset=Payment.objects.only("id", "psp_reference")
+    )
+    discounts_prefetch = Prefetch(
+        "discounts", queryset=OrderDiscount.objects.only("name", "translated_name")
+    )
+    lines_prefetch = Prefetch("lines", queryset=OrderLine.objects.only("product_sku"))
+    prefetch_related_objects(
+        [order],
+        "user",
+        "billing_address",
+        "shipping_address",
+        payments_prefetch,
+        discounts_prefetch,
+        lines_prefetch,
+    )
 
     user_data = order.user_email + "\n"
     if user := order.user:
@@ -40,27 +60,25 @@ def prepare_order_search_document_value(order: "Order"):
 
 def generate_order_payments_search_document_value(order: "Order"):
     payments_data = ""
-    for id, psp_reference in order.payments.values_list("id", "psp_reference"):
-        payments_data += graphene.Node.to_global_id("Payment", id) + "\n"
-        if psp_reference:
+    for payment in order.payments.all():
+        payments_data += graphene.Node.to_global_id("Payment", payment.id) + "\n"
+        if psp_reference := payment.psp_reference:
             payments_data += psp_reference + "\n"
     return payments_data
 
 
 def generate_order_discounts_search_document_value(order: "Order"):
     discount_data = ""
-    for data in order.discounts.values_list("name", "translated_name"):
-        for value in data:
-            if value:
+    for discount in order.discounts.all():
+        for field in ["name", "translated_name"]:
+            if value := getattr(discount, field):
                 discount_data += value + "\n"
     return discount_data
 
 
 def generate_order_lines_search_document_value(order: "Order"):
     lines_data = "\n".join(
-        order.lines.exclude(product_sku__isnull=True).values_list(  # type: ignore
-            "product_sku", flat=True
-        )
+        [line.product_sku for line in order.lines.all() if line.product_sku]
     )
     if lines_data:
         lines_data += "\n"

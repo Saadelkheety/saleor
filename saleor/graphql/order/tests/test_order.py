@@ -7343,6 +7343,7 @@ def test_order_query_with_filter_search_by_product_sku_order_line(
       }
     """
     order = order_line.order
+    order.refresh_from_db()
     update_order_search_document(order)
 
     variables = {"filter": {"search": order_line.product_sku}}
@@ -7474,6 +7475,7 @@ def test_order_query_with_filter_search_by_product_sku_multi_order_lines(
             ),
         ]
     )
+    order.refresh_from_db()
     update_order_search_document(order)
 
     variables = {"filter": {"search": lines[0].product_sku}}
